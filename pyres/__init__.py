@@ -151,19 +151,20 @@ class ResQ(object):
     attribute on it.
 
     """
-    def __init__(self, server="localhost:6379", password=None):
+    def __init__(self, server="localhost:6379", password=None, namespace="resque"):
         self.password = password
         self.redis = server
+        self.namespace = namespace
         self._watched_queues = set()
 
     def push(self, queue, item):
         self.watch_queue(queue)
-        self.redis.rpush("resque:queue:%s" % queue, ResQ.encode(item))
+        self.redis.rpush(self.namespace + ":queue:%s" % queue, ResQ.encode(item))
 
     def pop(self, queues, timeout=10):
         if isinstance(queues, string_types):
             queues = [queues]
-        ret = self.redis.blpop(["resque:queue:%s" % q for q in queues],
+        ret = self.redis.blpop([self.namespace + ":queue:%s" % q for q in queues],
                                timeout=timeout)
         if ret:
             key, ret = ret
@@ -172,17 +173,17 @@ class ResQ(object):
             return None, None
 
     def size(self, queue):
-        return int(self.redis.llen("resque:queue:%s" % queue))
+        return int(self.redis.llen(self.namespace + ":queue:%s" % queue))
 
     def watch_queue(self, queue):
         if queue in self._watched_queues:
             return
         else:
-            if self.redis.sadd('resque:queues',str(queue)):
+            if self.redis.sadd(self.namespace + ':queues',str(queue)):
                 self._watched_queues.add(queue)
 
     def peek(self, queue, start=0, count=1):
-        return self.list_range('resque:queue:%s' % queue, start, count)
+        return self.list_range(self.namespace + ':queue:%s' % queue, start, count)
 
     def list_range(self, key, start, count):
         items = self.redis.lrange(key, start,start+count-1) or []
@@ -240,10 +241,10 @@ class ResQ(object):
             logger.debug("no arguments passed in.")
 
     def queues(self):
-        return [sm.decode() for sm in self.redis.smembers("resque:queues")] or []
+        return [sm.decode() for sm in self.redis.smembers(self.namespace + ":queues")] or []
 
     def workers(self):
-        return [w.decode() for w in self.redis.smembers("resque:workers")] or []
+        return [w.decode() for w in self.redis.smembers(self.namespace + ":workers")] or []
 
     def info(self):
         """Returns a dictionary of the current status of the pending jobs,
@@ -264,8 +265,8 @@ class ResQ(object):
         }
 
     def keys(self):
-        return [key.decode().replace('resque:','')
-                for key in self.redis.keys('resque:*')]
+        return [key.decode().replace(self.namespace + ':','')
+                for key in self.redis.keys(self.namespace + ':*')]
 
     def reserve(self, queues):
         from pyres.job import Job
@@ -281,8 +282,8 @@ class ResQ(object):
     def remove_queue(self, queue):
         if queue in self._watched_queues:
             self._watched_queues.remove(queue)
-        self.redis.srem('resque:queues',queue)
-        del self.redis['resque:queue:%s' % queue]
+        self.redis.srem(self.namespace + ':queues',queue)
+        del self.redis[self.namespace + ':queue:%s' % queue]
 
     def close(self):
         """Close the underlying redis connection.
@@ -306,30 +307,30 @@ class ResQ(object):
 
     def delayed_push(self, datetime, item):
         key = int(time.mktime(datetime.timetuple()))
-        self.redis.rpush('resque:delayed:%s' % key, ResQ.encode(item))
-        self.redis.zadd('resque:delayed_queue_schedule', key, key)
+        self.redis.rpush(self.namespace + ':delayed:%s' % key, ResQ.encode(item))
+        self.redis.zadd(self.namespace + ':delayed_queue_schedule', key, key)
 
     def delayed_queue_peek(self, start, count):
         return [int(item) for item in self.redis.zrange(
-                'resque:delayed_queue_schedule', start, start+count) or []]
+                self.namespace + ':delayed_queue_schedule', start, start+count) or []]
 
     def delayed_timestamp_peek(self, timestamp, start, count):
-        return self.list_range('resque:delayed:%s' % timestamp, start, count)
+        return self.list_range(self.namespace + ':delayed:%s' % timestamp, start, count)
 
     def delayed_queue_schedule_size(self):
         size = 0
-        length = self.redis.zcard('resque:delayed_queue_schedule')
-        for i in self.redis.zrange('resque:delayed_queue_schedule',0,length):
+        length = self.redis.zcard(self.namespace + ':delayed_queue_schedule')
+        for i in self.redis.zrange(self.namespace + ':delayed_queue_schedule',0,length):
             size += self.delayed_timestamp_size(i.decode())
         return size
 
     def delayed_timestamp_size(self, timestamp):
         #key = int(time.mktime(timestamp.timetuple()))
-        return self.redis.llen("resque:delayed:%s" % timestamp)
+        return self.redis.llen(self.namespace + ":delayed:%s" % timestamp)
 
     def next_delayed_timestamp(self):
         key = int(time.mktime(ResQ._current_time().timetuple()))
-        array = self.redis.zrangebyscore('resque:delayed_queue_schedule',
+        array = self.redis.zrangebyscore(self.namespace + ':delayed_queue_schedule',
                                          '-inf', key, start=0, num=1)
         timestamp = None
         if array:
@@ -340,14 +341,14 @@ class ResQ(object):
 
     def next_item_for_timestamp(self, timestamp):
         #key = int(time.mktime(timestamp.timetuple()))
-        key = "resque:delayed:%s" % timestamp
+        key = self.namespace + ":delayed:%s" % timestamp
         ret = self.redis.lpop(key)
         item = None
         if ret:
             item = ResQ.decode(ret)
         if self.redis.llen(key) == 0:
             self.redis.delete(key)
-            self.redis.zrem('resque:delayed_queue_schedule', timestamp)
+            self.redis.zrem(self.namespace + ':delayed_queue_schedule', timestamp)
         return item
 
     @classmethod
@@ -381,7 +382,7 @@ class Stat(object):
     """
     def __init__(self, name, resq):
         self.name = name
-        self.key = "resque:stat:%s" % self.name
+        self.key = resq.namespace + ":stat:%s" % self.name
         self.resq = resq
 
     def get(self):

@@ -25,4 +25,4 @@ def retry(resq, queue, payload):
     return delete(resq, payload)
 
 def delete(resq, payload):
-    return resq.redis.lrem(name='resque:failed', num=1, value=payload)
+    return resq.redis.lrem(name= resq.namespace + ':failed', num=1, value=payload)

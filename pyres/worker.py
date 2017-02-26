@@ -24,6 +24,7 @@ class Worker(object):
     """
 
     job_class = Job
+    namespace = "resque"
 
     def __init__(self, queues=(), server="localhost:6379", password=None, timeout=None):
         self.queues = queues
@@ -35,7 +36,7 @@ class Worker(object):
         self.timeout = timeout
 
         if isinstance(server, string_types):
-            self.resq = ResQ(server=server, password=password)
+            self.resq = ResQ(server=server, password=password, namespace=self.namespace)
         elif isinstance(server, ResQ):
             self.resq = server
         else:
@@ -47,19 +48,19 @@ class Worker(object):
             raise NoQueueError("Please give each worker at least one queue.")
 
     def register_worker(self):
-        self.resq.redis.sadd('resque:workers', str(self))
+        self.resq.redis.sadd(self.namespace + ':workers', str(self))
         #self.resq._redis.add("worker:#{self}:started", Time.now.to_s)
         self.started = datetime.datetime.now()
 
     def _set_started(self, dt):
         if dt:
             key = int(time.mktime(dt.timetuple()))
-            self.resq.redis.set("resque:worker:%s:started" % self, key)
+            self.resq.redis.set(self.namespace + ":worker:%s:started" % self, key)
         else:
-            self.resq.redis.delete("resque:worker:%s:started" % self)
+            self.resq.redis.delete(self.namespace + ":worker:%s:started" % self)
 
     def _get_started(self):
-        datestring = self.resq.redis.get("resque:worker:%s:started" % self)
+        datestring = self.resq.redis.get(self.namespace + ":worker:%s:started" % self)
         #ds = None
         #if datestring:
         #    ds = datetime.datetime.strptime(datestring, '%Y-%m-%d %H:%M:%S')
@@ -68,7 +69,7 @@ class Worker(object):
     started = property(_get_started, _set_started)
 
     def unregister_worker(self):
-        self.resq.redis.srem('resque:workers', str(self))
+        self.resq.redis.srem(self.namespace + ':workers', str(self))
         self.started = None
         Stat("processed:%s" % self, self.resq).clear()
         Stat("failed:%s" % self, self.resq).clear()
@@ -289,14 +290,14 @@ class Worker(object):
             'payload': job._payload
         }
         data = json.dumps(data)
-        self.resq.redis["resque:worker:%s" % str(self)] = data
+        self.resq.redis[self.namespace + ":worker:%s" % str(self)] = data
         logger.debug("worker:%s" % str(self))
-        logger.debug(self.resq.redis["resque:worker:%s" % str(self)])
+        logger.debug(self.resq.redis[self.namespace + ":worker:%s" % str(self)])
 
     def done_working(self, job):
         logger.debug('done working on %s', job)
         self.processed()
-        self.resq.redis.delete("resque:worker:%s" % str(self))
+        self.resq.redis.delete(self.namespace + ":worker:%s" % str(self))
 
     def processed(self):
         total_processed = Stat("processed", self.resq)
@@ -315,7 +316,7 @@ class Worker(object):
         return Stat("failed:%s" % self, self.resq).get()
 
     def job(self):
-        data = self.resq.redis.get("resque:worker:%s" % self)
+        data = self.resq.redis.get(self.namespace + ":worker:%s" % self)
         if data:
             return ResQ.decode(data)
         return {}
@@ -325,7 +326,7 @@ class Worker(object):
         return self.job()
 
     def state(self):
-        if self.resq.redis.exists('resque:worker:%s' % self):
+        if self.resq.redis.exists(self.namespace + ':worker:%s' % self):
             return 'working'
         return 'idle'
 
@@ -341,7 +342,8 @@ class Worker(object):
             return []
 
     @classmethod
-    def run(cls, queues, server="localhost:6379", password=None, interval=None, timeout=None):
+    def run(cls, queues, server="localhost:6379", password=None, interval=None, timeout=None, namespace="resque"):
+        cls.namespace = namespace
         worker = cls(queues=queues, server=server, password=password, timeout=timeout)
         if interval is not None:
             worker.work(interval)
@@ -351,7 +353,7 @@ class Worker(object):
     @classmethod
     def all(cls, host="localhost:6379"):
         if isinstance(host,string_types):
-            resq = ResQ(host)
+            resq = ResQ(server=host, namespace=cls.namespace)
         elif isinstance(host, ResQ):
             resq = host
 
@@ -360,12 +362,12 @@ class Worker(object):
     @classmethod
     def working(cls, host):
         if isinstance(host, string_types):
-            resq = ResQ(host)
+            resq = ResQ(server=host, namespace=cls.namespace)
         elif isinstance(host, ResQ):
             resq = host
         total = []
         for key in Worker.all(host):
-            total.append('resque:worker:%s' % key)
+            total.append(cls.namespace + ':worker:%s' % key)
         names = []
         for key in total:
             value = resq.redis.get(key)
@@ -386,7 +388,7 @@ class Worker(object):
 
     @classmethod
     def exists(cls, worker_id, resq):
-        return resq.redis.sismember('resque:workers', worker_id)
+        return resq.redis.sismember(cls.namespace + ':workers', worker_id)
 
 
 try:

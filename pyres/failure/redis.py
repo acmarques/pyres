@@ -22,15 +22,15 @@ class RedisBackend(BaseBackend):
         if self._worker:
             data['worker'] = self._worker
         data = ResQ.encode(data)
-        resq.redis.rpush('resque:failed', data)
+        resq.redis.rpush(resq.namespace + ':failed', data)
 
     @classmethod
     def count(cls, resq):
-        return int(resq.redis.llen('resque:failed'))
+        return int(resq.redis.llen(resq.namespace + ':failed'))
 
     @classmethod
     def all(cls, resq, start=0, count=1):
-        items = resq.redis.lrange('resque:failed', start, count) or []
+        items = resq.redis.lrange(resq.namespace + ':failed', start, count) or []
 
         ret_list = []
         for i in items:
@@ -41,5 +41,5 @@ class RedisBackend(BaseBackend):
 
     @classmethod
     def clear(cls, resq):
-        return resq.redis.delete('resque:failed')
+        return resq.redis.delete(resq.namespace + ':failed')
 
