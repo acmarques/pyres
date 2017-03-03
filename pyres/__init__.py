@@ -8,6 +8,7 @@ import os
 import time, datetime
 import sys
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,10 @@ def setup_pidfile(path):
     with open(path, 'w') as f:
         f.write(str(os.getpid()))
 
+def underscore(name):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
 def my_import(name):
     """Helper function for walking import calls when searching for classes by
     string names.
@@ -104,7 +109,7 @@ def safe_str_to_class(s):
     # module name" exception.  To avoid that, if there's no module in
     # the json then we'll use the classname as a module name.
     if not module:
-        module = klass
+        module = underscore(klass)
 
     mod = my_import(module)
     if hasattr(mod, klass):
@@ -224,7 +229,7 @@ class ResQ(object):
         """
         queue = getattr(klass,'queue', None)
         if queue:
-            class_name = '%s.%s' % (klass.__module__, klass.__name__)
+            class_name = klass.__name__
             self.enqueue_from_string(class_name, queue, *args)
         else:
             logger.warning("unable to enqueue job with class %s" % str(klass))
